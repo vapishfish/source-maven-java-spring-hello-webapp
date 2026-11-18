@@ -1,22 +1,58 @@
 pipeline {
-  agent {label 'jenkins-node'}
+  agent none
   stages {
-    stage ('checkout') {
+    stage('Checkout') {
+      agent {
+        docker { image 'maven:3-eclipse-temurin-21' }
+      }
       steps {
-        git branch: 'main',
-        url: 'https://github.com/vapishfish/source-maven-java-spring-hello-webapp.git'
+        git branch: 'main', url: 'https://github.com/vapishfish/source-maven-java-spring-hello-webapp.git'
       }
     }
-  
-    stage ('build') {
+    stage('Test Application') {
+      agent {
+        docker { image 'maven:3-eclipse-temurin-21' }
+      }
       steps {
-        sh 'mvn clean package'
+        sh 'mvn test'
       }
     }
-    stage ('deploy') {
+    stage('Build Application') {
+      agent {
+        docker { image 'maven:3-eclipse-temurin-21' }
+      }
       steps {
-        deploy adapters: [tomcat9(credentialsId: 'tomcat-manager', url: 'http://192.168.153.102:8080')], contextPath: null, war: 'target/hello-world.war'
+        sh 'mvn clean package -DskipTests=true'
+      }
+    }
+    stage('Build Container Image') {
+      agent { label 'controller' }
+      steps {
+        sh 'docker image build -t testimg .'
+      }
+    }
+    stage('Tag Container Image') {
+      agent { label 'controller' }
+      steps {
+        sh 'docker image tag testimg vapishfish/mytomcat:v${BUILD_NUMBER}' // Tagging with build number
+        sh 'docker image tag testimg vapishfish/mytomcat:latest' // Tagging with latest
+      }
+    }
+    stage('Push Container Image') {
+      agent { label 'controller' }
+      steps {
+        withDockerRegistry(credentialsId: 'docker-registry-credential', url: 'https://index.docker.io/v1/') {
+          sh 'docker image push vapishfish/mytomcat:v${BUILD_NUMBER}' // Tagging with build number
+          sh 'docker image push vapishfish/mytomcat:latest' // Tagging with latest
+        }
+      }
+    }
+    stage('Run Container') {
+      agent { label 'controller' }
+      steps {
+        sh 'docker container run --detach --name vapishfish -p 80:8080 vapishfish/mytomcat:latest'
       }
     }
   }
 }
+
